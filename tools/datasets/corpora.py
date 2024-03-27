@@ -28,8 +28,8 @@ When done, add it to the DATA_DOWNLOADERS dict. The function process_data runs t
 dataset.
 """
 
-GPT2_VOCAB_URL = "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-vocab.json"
-GPT2_MERGE_URL = "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-merges.txt"
+GPT2_VOCAB_URL = "https://huggingface.co/datasets/RaviChandera/gpt2_custom_vocab/raw/main/gpt2-custom-vocab.json"
+GPT2_MERGE_URL = "https://huggingface.co/datasets/RaviChandera/gpt2_custom_vocab/raw/main/gpt2-custom-merges.txt"
 
 
 class DataDownloader(ABC):
