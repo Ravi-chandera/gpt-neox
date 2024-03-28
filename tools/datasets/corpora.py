@@ -17,6 +17,9 @@
 import os
 from abc import ABC, abstractmethod
 from multiprocessing import cpu_count
+from datasets import load_dataset
+from tqdm import tqdm
+import zipfile
 
 """
 This registry is for automatically downloading and extracting datasets.
@@ -27,6 +30,7 @@ the number of documents.
 When done, add it to the DATA_DOWNLOADERS dict. The function process_data runs the pre-processing for the selected
 dataset.
 """
+
 GPT2_VOCAB_URL = "https://huggingface.co/datasets/RaviChandera/gpt2-vocab/raw/main/gpt2-vocab.json"
 GPT2_MERGE_URL = "https://huggingface.co/datasets/RaviChandera/gpt2-merges/raw/main/gpt2-merges.txt"
 
@@ -42,6 +46,7 @@ class DataDownloader(ABC):
         data_dir=None,
         force_redownload=None,
         num_workers=None,
+        dataset_name=None,
     ):
         if tokenizer_type is None:
             tokenizer_type = "GPT2BPETokenizer"
@@ -68,6 +73,7 @@ class DataDownloader(ABC):
         self._data_dir = data_dir
         self._force_redownload = force_redownload
         self._num_workers = num_workers
+        self.dataset_name = dataset_name
 
     @property
     def base_dir(self):
@@ -133,12 +139,13 @@ class DataDownloader(ABC):
             except Exception as e:
                 raise Exception(f"Download error: {e}")
 
-    def tokenize(self):
+    def tokenize(self, jsonl_filepath = None):
+
         """tokenizes dataset"""
         parent_folder = os.path.join(self.base_dir, self.name)
-        jsonl_filepath = ",".join(
+        jsonl_filepath = jsonl_filepath if jsonl_filepath is not None else ",".join(
             [os.path.join(parent_folder, os.path.basename(url)) for url in self.urls]
-        )
+        )  
 
         cmd = f"python tools/datasets/preprocess_data.py \
             --input {jsonl_filepath} \
@@ -158,14 +165,41 @@ class DataDownloader(ABC):
 
         os.system(cmd)
 
+        
+    def customdataset_from_text(self):
+
+        os.makedirs(os.path.join(self.base_dir, self.name), exist_ok=True)
+        download_dir = os.path.join(self.base_dir, self.name)
+
+        zip_file_path = "/content/gpt-neox/data/text_file.zip"
+        txt_files = [f for f in os.listdir(self.base_dir) if f.endswith('.txt') and f != "gpt2-merges.txt"]
+
+        # Assert that there are .txt files
+        assert txt_files, f"No textfile found at {self.base_dir}."
+        
+        with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+
+            for txt_file in txt_files:
+                file_path = os.path.join(self.base_dir, txt_file)
+                zipf.write(file_path, os.path.basename(file_path))
+                
+
+
     def prepare(self):
-        if self._force_redownload:
+        
+        if self.name == "customdataset":
+            self.customdataset_from_text()
+            zip_file_path = os.path.join(os.path.join(self.base_dir, self.name), f"{self.name}.zip")
+            self.tokenize(zip_file_path)
+
+        elif self._force_redownload:
             self.download()
+            self.tokenize()
         else:
             if not self.exists():
                 self.download()
-
-        self.tokenize()
+            self.tokenize()
+        
 
 
 class Enron(DataDownloader):
@@ -287,9 +321,10 @@ class C4OpenWebText(DataDownloader):
     ]
 
 
-class Enwik8(DataDownloader):
-    name = "enwik8"
-    urls = ["http://mattmahoney.net/dc/enwik8.zip"]
+class CustomDataset(DataDownloader):
+    name = "customdataset"
+    urls = None 
+
 
 
 def maybe_download_gpt2_tokenizer_data(tokenizer_type, data_dir):
@@ -322,7 +357,7 @@ DATA_DOWNLOADERS = {
     "youtube_subtitles": YoutubeSubtitles,
     "c4": C4,
     "c4_openwebtext": C4OpenWebText,
-    "enwik8": Enwik8,
+    "customdataset":CustomDataset,
 }
 
 
@@ -342,7 +377,9 @@ def prepare_dataset(
         data_dir = os.environ.get("DATA_DIR", "./data")
     os.makedirs(data_dir, exist_ok=True)
     maybe_download_gpt2_tokenizer_data(tokenizer_type, data_dir)
-    DownloaderClass = DATA_DOWNLOADERS.get(dataset_name.lower(), None)
+    DownloaderClass = DATA_DOWNLOADERS.get(dataset_name.split('/')[0].lower(), None)
+
+    # print(f'check {dataset_name.split('/')[0]}')
     if DownloaderClass is None:
         raise NotImplementedError(
             f'Dataset "{dataset_name}" not recognized - please choose from {list(DATA_DOWNLOADERS.keys())}'
@@ -350,8 +387,10 @@ def prepare_dataset(
     elif DownloaderClass == "pass":
         # pass on building dataset (for unit tests)
         pass
+
     else:
-        num_workers = 1 if dataset_name == "enwik8" else num_workers
+        num_workers = 1
+        ds_name  = dataset_name if dataset_name.split('/')[0] in ["customdataset"] else None
         d = DownloaderClass(
             tokenizer_type=tokenizer_type,
             vocab_file=vocab_file,
@@ -359,5 +398,6 @@ def prepare_dataset(
             data_dir=data_dir,
             force_redownload=force_redownload,
             num_workers=num_workers,
+            dataset_name = ds_name
         )
         d.prepare()
